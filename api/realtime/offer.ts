@@ -2,9 +2,40 @@ type OfferRequestBody = {
   sdp: string;
 };
 
-export const config = {
-  runtime: 'edge',
-};
+export const runtime = 'edge';
+export const config = { runtime };
+
+async function readJsonBody<T>(req: Request | any): Promise<T> {
+  // Edge Request
+  if (typeof req?.json === 'function') {
+    return (await req.json()) as T;
+  }
+
+  // Vercel serverless (Node) may give body already parsed
+  if (req?.body) {
+    if (typeof req.body === 'string') {
+      return JSON.parse(req.body) as T;
+    }
+    if (Buffer.isBuffer(req.body)) {
+      return JSON.parse(req.body.toString('utf8')) as T;
+    }
+  }
+
+  // As a fallback, read from stream
+  if (req?.body && typeof req.body.getReader === 'function') {
+    const reader = req.body.getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value);
+    }
+    const text = Buffer.concat(chunks).toString('utf8');
+    return JSON.parse(text) as T;
+  }
+
+  throw new Error('Cannot read request body');
+}
 
 export default async function handler(request: Request) {
   if (request.method !== 'POST') {
@@ -25,7 +56,7 @@ export default async function handler(request: Request) {
 
   let body: OfferRequestBody;
   try {
-    body = (await request.json()) as OfferRequestBody;
+    body = await readJsonBody<OfferRequestBody>(request);
   } catch (error) {
     return new Response(
       JSON.stringify({

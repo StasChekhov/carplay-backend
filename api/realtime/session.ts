@@ -5,9 +5,40 @@ type OpenAIRealtimeSessionResponse = {
   expires_at?: string | number;
 };
 
-export const config = {
-  runtime: 'edge',
-};
+export const runtime = 'edge';
+export const config = { runtime };
+
+async function readJsonBody<T>(req: Request | any): Promise<T | undefined> {
+  // Edge Request
+  if (typeof req?.json === 'function') {
+    return (await req.json()) as T;
+  }
+
+  // Vercel serverless (Node) may give body already parsed
+  if (req?.body) {
+    if (typeof req.body === 'string') {
+      return JSON.parse(req.body) as T;
+    }
+    if (Buffer.isBuffer(req.body)) {
+      return JSON.parse(req.body.toString('utf8')) as T;
+    }
+  }
+
+  // As a fallback, read from stream
+  if (req?.body && typeof req.body.getReader === 'function') {
+    const reader = req.body.getReader();
+    const chunks: Uint8Array[] = [];
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) chunks.push(value);
+    }
+    const text = Buffer.concat(chunks).toString('utf8');
+    return JSON.parse(text) as T;
+  }
+
+  return undefined;
+}
 
 export default async function handler(request: Request) {
   if (request.method !== 'POST') {
@@ -16,6 +47,9 @@ export default async function handler(request: Request) {
       headers: { Allow: 'POST', 'Content-Type': 'application/json' },
     });
   }
+
+  // allow optional model override via body
+  const payload = (await readJsonBody<{ model?: string }>(request)) || {};
 
   const apiKey = process.env.OPENAI_API_KEY;
 
@@ -39,7 +73,7 @@ export default async function handler(request: Request) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-4o-realtime-preview',
+          model: payload.model || 'gpt-4o-realtime-preview',
           voice: 'alloy',
           modalities: ['audio'],
         }),
