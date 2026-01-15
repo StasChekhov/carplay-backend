@@ -23,7 +23,11 @@ export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
-      headers: { ...corsHeaders, Allow: 'POST', 'Content-Type': 'application/json' },
+      headers: {
+        ...corsHeaders,
+        Allow: 'POST',
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ error: 'Method Not Allowed' }),
     };
   }
@@ -96,7 +100,10 @@ export const handler: Handler = async (event) => {
     return {
       statusCode: status,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Upstream request failed', details: message }),
+      body: JSON.stringify({
+        error: 'Upstream request failed',
+        details: message,
+      }),
     };
   } finally {
     clearTimeout(timeoutId);

@@ -28,26 +28,30 @@ export const handler: Handler = async (event) => {
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
-      headers: { ...corsHeaders, Allow: 'POST', 'Content-Type': 'application/json' },
+      headers: {
+        ...corsHeaders,
+        Allow: 'POST',
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ error: 'Method Not Allowed' }),
     };
   }
 
-const apiKey = process.env.OPENAI_API_KEY;
-const envModel = process.env.REALTIME_MODEL;
-if (!apiKey) {
-  return {
-    statusCode: 500,
-    headers: corsHeaders,
-    body: JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
-  };
-}
+  const apiKey = process.env.OPENAI_API_KEY;
+  const envModel = process.env.REALTIME_MODEL;
+  if (!apiKey) {
+    return {
+      statusCode: 500,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
+    };
+  }
 
-const payload = parseBody<SessionRequestBody>(event.body) || {};
-const model = payload.model || envModel || 'gpt-4o-realtime-preview';
+  const payload = parseBody<SessionRequestBody>(event.body) || {};
+  const model = payload.model || envModel || 'gpt-4o-realtime-preview';
 
-const controller = new AbortController();
-const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
 
   try {
     const response = await fetch(
