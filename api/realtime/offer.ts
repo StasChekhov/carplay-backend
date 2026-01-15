@@ -1,7 +1,5 @@
-import fetch from 'node-fetch';
-
-export const config = {
-  runtime: 'edge',
+type OfferRequestBody = {
+  sdp: string;
 };
 
 export default async function handler(request: Request) {
@@ -14,7 +12,7 @@ export default async function handler(request: Request) {
     );
   }
 
-  const body = await request.json().catch(() => null);
+  const body = (await request.json()) as OfferRequestBody;
 
   if (!body?.sdp) {
     return new Response(JSON.stringify({ error: 'SDP is required' }), {

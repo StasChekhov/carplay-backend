@@ -1,5 +1,3 @@
-import fetch from 'node-fetch';
-
 type OpenAIRealtimeSessionResponse = {
   client_secret?: {
     value?: string;
