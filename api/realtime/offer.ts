@@ -2,6 +2,10 @@ type OfferRequestBody = {
   sdp: string;
 };
 
+export const config = {
+  runtime: 'edge',
+};
+
 export default async function handler(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
 
