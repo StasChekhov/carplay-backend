@@ -5,8 +5,7 @@ type OpenAIRealtimeSessionResponse = {
   expires_at?: string | number;
 };
 
-export const runtime = 'edge';
-export const config = { runtime };
+export const config = { runtime: 'edge' };
 
 async function readJsonBody<T>(req: Request | any): Promise<T | undefined> {
   // Edge Request
@@ -14,13 +13,18 @@ async function readJsonBody<T>(req: Request | any): Promise<T | undefined> {
     return (await req.json()) as T;
   }
 
-  // Vercel serverless (Node) may give body already parsed
+  // Body already parsed or provided
   if (req?.body) {
     if (typeof req.body === 'string') {
       return JSON.parse(req.body) as T;
     }
-    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(req.body)) {
-      return JSON.parse(req.body.toString('utf8')) as T;
+    if (req.body instanceof ArrayBuffer) {
+      const text = new TextDecoder().decode(new Uint8Array(req.body));
+      return JSON.parse(text) as T;
+    }
+    if (req.body instanceof Uint8Array) {
+      const text = new TextDecoder().decode(req.body);
+      return JSON.parse(text) as T;
     }
   }
 
