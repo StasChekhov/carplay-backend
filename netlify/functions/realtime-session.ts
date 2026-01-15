@@ -14,11 +14,21 @@ function parseBody<T>(body?: string | null): T | undefined {
   return JSON.parse(body) as T;
 }
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
 export const handler: Handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers: corsHeaders, body: '' };
+  }
+
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
-      headers: { Allow: 'POST', 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, Allow: 'POST', 'Content-Type': 'application/json' },
       body: JSON.stringify({ error: 'Method Not Allowed' }),
     };
   }
@@ -27,6 +37,7 @@ export const handler: Handler = async (event) => {
   if (!apiKey) {
     return {
       statusCode: 500,
+      headers: corsHeaders,
       body: JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
     };
   }
@@ -56,14 +67,14 @@ export const handler: Handler = async (event) => {
 
     if (!response.ok) {
       const text = await response.text();
-      return { statusCode: response.status, body: text };
+      return { statusCode: response.status, headers: corsHeaders, body: text };
     }
 
     const data = (await response.json()) as OpenAIRealtimeSessionResponse;
 
     return {
       statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         client_secret: data.client_secret?.value,
         expires_at: data.expires_at,
@@ -74,7 +85,7 @@ export const handler: Handler = async (event) => {
     const status = message.includes('aborted') ? 504 : 502;
     return {
       statusCode: status,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         error: 'Upstream request failed',
         details: message,
