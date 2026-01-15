@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "devDependencies": {
-    "@types/node": "^25.0.8"
+    "@types/node": "^25.0.8",
+    "@netlify/functions": "^2.8.1"
   }
 }

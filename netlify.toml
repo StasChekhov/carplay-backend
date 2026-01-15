@@ -1,0 +1,9 @@
+[[redirects]]
+  from = "/api/realtime/offer"
+  to = "/.netlify/functions/realtime-offer"
+  status = 200
+
+[[redirects]]
+  from = "/api/realtime/session"
+  to = "/.netlify/functions/realtime-session"
+  status = 200

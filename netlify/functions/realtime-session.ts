@@ -1,0 +1,80 @@
+import type { Handler } from '@netlify/functions';
+
+type OpenAIRealtimeSessionResponse = {
+  client_secret?: { value?: string };
+  expires_at?: string | number;
+};
+
+type SessionRequestBody = { model?: string };
+
+const controllerTimeoutMs = 15000;
+
+function parseBody<T>(body?: string | null): T | undefined {
+  if (!body) return undefined;
+  return JSON.parse(body) as T;
+}
+
+export const handler: Handler = async (event) => {
+  if (event.httpMethod !== 'POST') {
+    return {
+      statusCode: 405,
+      headers: { Allow: 'POST', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Method Not Allowed' }),
+    };
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
+    };
+  }
+
+  const payload = parseBody<SessionRequestBody>(event.body) || {};
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: payload.model || 'gpt-4o-realtime-preview',
+        voice: 'alloy',
+        modalities: ['audio'],
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return { statusCode: response.status, body: text };
+    }
+
+    const data = (await response.json()) as OpenAIRealtimeSessionResponse;
+
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_secret: data.client_secret?.value,
+        expires_at: data.expires_at,
+      }),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message.includes('aborted') ? 504 : 502;
+    return {
+      statusCode: status,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Upstream request failed', details: message }),
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};

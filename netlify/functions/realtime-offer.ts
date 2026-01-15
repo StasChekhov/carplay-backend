@@ -1,0 +1,86 @@
+import type { Handler } from '@netlify/functions';
+
+type OfferRequestBody = { sdp?: string };
+
+const controllerTimeoutMs = 15000;
+
+function parseBody<T>(body?: string | null): T {
+  if (!body) throw new Error('Body is empty');
+  return JSON.parse(body) as T;
+}
+
+export const handler: Handler = async (event) => {
+  if (event.httpMethod !== 'POST') {
+    return {
+      statusCode: 405,
+      headers: { Allow: 'POST', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Method Not Allowed' }),
+    };
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
+    };
+  }
+
+  let body: OfferRequestBody;
+  try {
+    body = parseBody<OfferRequestBody>(event.body);
+  } catch (error) {
+    return {
+      statusCode: 400,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        error: 'Invalid JSON body',
+        details: error instanceof Error ? error.message : String(error),
+      }),
+    };
+  }
+
+  if (!body?.sdp) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: 'SDP is required' }),
+    };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/realtime', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/sdp',
+      },
+      body: body.sdp,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return { statusCode: response.status, body: text };
+    }
+
+    const answerSdp = await response.text();
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sdp: answerSdp }),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message.includes('aborted') ? 504 : 502;
+    return {
+      statusCode: status,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Upstream request failed', details: message }),
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
