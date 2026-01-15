@@ -9,7 +9,14 @@ export const config = {
   runtime: 'edge',
 };
 
-export default async function handler() {
+export default async function handler(request: Request) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
+      status: 405,
+      headers: { Allow: 'POST', 'Content-Type': 'application/json' },
+    });
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
 
   if (!apiKey) {
@@ -22,48 +29,51 @@ export default async function handler() {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-  let response: Response;
   try {
-    response = await fetch('https://api.openai.com/v1/realtime/sessions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-realtime-preview',
-        voice: 'alloy',
-        modalities: ['audio'],
+    const response = await fetch(
+      'https://api.openai.com/v1/realtime/sessions',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-realtime-preview',
+          voice: 'alloy',
+          modalities: ['audio'],
+        }),
+        signal: controller.signal,
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      return new Response(text, { status: response.status });
+    }
+
+    const data = (await response.json()) as OpenAIRealtimeSessionResponse;
+
+    return new Response(
+      JSON.stringify({
+        client_secret: data.client_secret?.value,
+        expires_at: data.expires_at,
       }),
-      signal: controller.signal,
-    });
+      {
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
   } catch (error) {
-    clearTimeout(timeoutId);
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message.includes('aborted') ? 504 : 502;
     return new Response(
       JSON.stringify({
         error: 'Upstream request failed',
-        details: error instanceof Error ? error.message : String(error),
+        details: message,
       }),
-      { status: 502, headers: { 'Content-Type': 'application/json' } }
+      { status, headers: { 'Content-Type': 'application/json' } }
     );
   } finally {
     clearTimeout(timeoutId);
   }
-
-  if (!response.ok) {
-    const text = await response.text();
-    return new Response(text, { status: response.status });
-  }
-
-  const data = (await response.json()) as OpenAIRealtimeSessionResponse;
-
-  return new Response(
-    JSON.stringify({
-      client_secret: data.client_secret?.value,
-      expires_at: data.expires_at,
-    }),
-    {
-      headers: { 'Content-Type': 'application/json' },
-    }
-  );
 }
