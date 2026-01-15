@@ -37,19 +37,22 @@ export const handler: Handler = async (event) => {
   const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
 
   try {
-    const response = await fetch('https://api.openai.com/v1/realtime/sessions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: payload.model || 'gpt-4o-realtime-preview',
-        voice: 'alloy',
-        modalities: ['audio'],
-      }),
-      signal: controller.signal,
-    });
+    const response = await fetch(
+      'https://api.openai.com/v1/realtime/sessions',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: payload.model || 'gpt-4o-realtime-preview',
+          voice: 'alloy',
+          modalities: ['audio', 'text'],
+        }),
+        signal: controller.signal,
+      }
+    );
 
     if (!response.ok) {
       const text = await response.text();
@@ -72,7 +75,10 @@ export const handler: Handler = async (event) => {
     return {
       statusCode: status,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Upstream request failed', details: message }),
+      body: JSON.stringify({
+        error: 'Upstream request failed',
+        details: message,
+      }),
     };
   } finally {
     clearTimeout(timeoutId);
