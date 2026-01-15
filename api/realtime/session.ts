@@ -1,7 +1,10 @@
 import fetch from 'node-fetch';
 
-export const config = {
-  runtime: 'edge',
+type OpenAIRealtimeSessionResponse = {
+  client_secret?: {
+    value?: string;
+  };
+  expires_at?: string | number;
 };
 
 export default async function handler() {
@@ -32,7 +35,7 @@ export default async function handler() {
     return new Response(text, { status: response.status });
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as OpenAIRealtimeSessionResponse;
 
   return new Response(
     JSON.stringify({
