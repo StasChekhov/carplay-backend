@@ -16,7 +16,7 @@ async function readJsonBody<T>(req: Request | any): Promise<T> {
     if (typeof req.body === 'string') {
       return JSON.parse(req.body) as T;
     }
-    if (Buffer.isBuffer(req.body)) {
+    if (typeof Buffer !== 'undefined' && Buffer.isBuffer(req.body)) {
       return JSON.parse(req.body.toString('utf8')) as T;
     }
   }
@@ -30,7 +30,14 @@ async function readJsonBody<T>(req: Request | any): Promise<T> {
       if (done) break;
       if (value) chunks.push(value);
     }
-    const text = Buffer.concat(chunks).toString('utf8');
+    const totalLength = chunks.reduce((acc, cur) => acc + cur.length, 0);
+    const merged = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    const text = new TextDecoder().decode(merged);
     return JSON.parse(text) as T;
   }
 
