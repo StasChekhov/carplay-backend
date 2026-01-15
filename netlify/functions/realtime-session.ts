@@ -33,19 +33,21 @@ export const handler: Handler = async (event) => {
     };
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return {
-      statusCode: 500,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
-    };
-  }
+const apiKey = process.env.OPENAI_API_KEY;
+const envModel = process.env.REALTIME_MODEL;
+if (!apiKey) {
+  return {
+    statusCode: 500,
+    headers: corsHeaders,
+    body: JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
+  };
+}
 
-  const payload = parseBody<SessionRequestBody>(event.body) || {};
+const payload = parseBody<SessionRequestBody>(event.body) || {};
+const model = payload.model || envModel || 'gpt-4o-realtime-preview';
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
+const controller = new AbortController();
+const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
 
   try {
     const response = await fetch(
@@ -57,9 +59,11 @@ export const handler: Handler = async (event) => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: payload.model || 'gpt-4o-realtime-preview',
-          voice: 'alloy',
+          model,
+          voice: 'verse',
           modalities: ['audio', 'text'],
+          input_audio_format: 'pcm16',
+          output_audio_format: 'pcm16',
         }),
         signal: controller.signal,
       }

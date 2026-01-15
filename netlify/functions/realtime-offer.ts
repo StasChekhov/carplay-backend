@@ -1,6 +1,6 @@
 import type { Handler } from '@netlify/functions';
 
-type OfferRequestBody = { sdp?: string };
+type OfferRequestBody = { sdp?: string; model?: string };
 
 const controllerTimeoutMs = 15000;
 
@@ -29,6 +29,7 @@ export const handler: Handler = async (event) => {
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
+  const envModel = process.env.REALTIME_MODEL;
   if (!apiKey) {
     return {
       statusCode: 500,
@@ -59,19 +60,24 @@ export const handler: Handler = async (event) => {
     };
   }
 
+  const model = body.model || envModel || 'gpt-4o-realtime-preview';
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
 
   try {
-    const response = await fetch('https://api.openai.com/v1/realtime', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/sdp',
-      },
-      body: body.sdp,
-      signal: controller.signal,
-    });
+    const response = await fetch(
+      `https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/sdp',
+        },
+        body: body.sdp,
+        signal: controller.signal,
+      }
+    );
 
     if (!response.ok) {
       const text = await response.text();
