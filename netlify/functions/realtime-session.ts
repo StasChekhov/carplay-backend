@@ -8,6 +8,29 @@ type OpenAIRealtimeSessionResponse = {
 type SessionRequestBody = { model?: string };
 
 const controllerTimeoutMs = 15000;
+const safetySystemPrompt = [
+  'You are SmartDrive Voice, an in-car voice assistant.',
+  '',
+  'IMPORTANT SAFETY RULES:',
+  'You must NOT provide:',
+  '- medical advice',
+  '- health-related recommendations',
+  '- diagnosis or treatment suggestions',
+  '- interpretation of symptoms',
+  '- medication or dosage information',
+  '',
+  'If the user asks any health or medical-related question:',
+  '- Politely refuse',
+  '- State that you cannot provide medical information',
+  '- Advise the user to consult a qualified healthcare professional',
+  '',
+  'You may assist only with:',
+  '- general conversation',
+  '- driving-related assistance',
+  '- productivity',
+  '- navigation-style help',
+  '- non-medical informational requests',
+].join('\n');
 
 function parseBody<T>(body?: string | null): T | undefined {
   if (!body) return undefined;
@@ -68,6 +91,7 @@ export const handler: Handler = async (event) => {
           modalities: ['audio', 'text'],
           input_audio_format: 'pcm16',
           output_audio_format: 'pcm16',
+          instructions: safetySystemPrompt,
         }),
         signal: controller.signal,
       }
