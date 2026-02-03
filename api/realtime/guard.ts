@@ -4,6 +4,8 @@ type GuardRequestBody = {
   audio_base64?: string;
   mime_type?: string;
   model?: string;
+  transcript?: string;
+  text?: string;
 };
 
 type TranscriptionResponse = {
@@ -96,37 +98,34 @@ export default async function handler(request?: Request) {
     }
   }
 
-  if (!payload?.audio_base64) {
-    return new Response(
-      JSON.stringify({ error: 'audio_base64 is required' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } }
-    );
+  const textFallback = (payload?.transcript ?? payload?.text ?? '').trim();
+  const mimeType = payload?.mime_type || 'audio/wav';
+  const model = payload?.model || transcriptionModel;
+
+  let transcript = textFallback;
+  if (payload?.audio_base64) {
+    const audioBuffer = Buffer.from(payload.audio_base64, 'base64');
+    const form = new FormData();
+    const file = new Blob([audioBuffer], { type: mimeType });
+    form.append('file', file, 'audio');
+    form.append('model', model);
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: form,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return new Response(text, { status: response.status });
+    }
+
+    const data = (await response.json()) as TranscriptionResponse;
+    transcript = data.text?.trim() || '';
   }
-
-  const mimeType = payload.mime_type || 'audio/wav';
-  const model = payload.model || transcriptionModel;
-
-  const audioBuffer = Buffer.from(payload.audio_base64, 'base64');
-  const form = new FormData();
-  const file = new Blob([audioBuffer], { type: mimeType });
-  form.append('file', file, 'audio');
-  form.append('model', model);
-
-  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: form,
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    return new Response(text, { status: response.status });
-  }
-
-  const data = (await response.json()) as TranscriptionResponse;
-  const transcript = data.text?.trim() || '';
   const blocked = transcript ? isBlockedHealthRequest(transcript) : false;
 
   if (blocked) {

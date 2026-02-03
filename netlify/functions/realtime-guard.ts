@@ -5,6 +5,8 @@ type GuardRequestBody = {
   audio_base64?: string;
   mime_type?: string;
   model?: string;
+  transcript?: string;
+  text?: string;
 };
 
 type TranscriptionResponse = {
@@ -133,14 +135,7 @@ export const handler: Handler = async (event) => {
     };
   }
 
-  if (!payload.audio_base64) {
-    return {
-      statusCode: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'audio_base64 is required' }),
-    };
-  }
-
+  const textFallback = (payload.transcript ?? payload.text ?? '').trim();
   const mimeType = payload.mime_type || 'audio/wav';
   const model = payload.model || transcriptionModel;
 
@@ -148,28 +143,31 @@ export const handler: Handler = async (event) => {
   const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
 
   try {
-    const audioBuffer = Buffer.from(payload.audio_base64, 'base64');
-    const form = new FormData();
-    const file = new Blob([audioBuffer], { type: mimeType });
-    form.append('file', file, 'audio');
-    form.append('model', model);
+    let transcript = textFallback;
+    if (payload.audio_base64) {
+      const audioBuffer = Buffer.from(payload.audio_base64, 'base64');
+      const form = new FormData();
+      const file = new Blob([audioBuffer], { type: mimeType });
+      form.append('file', file, 'audio');
+      form.append('model', model);
 
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: form,
-      signal: controller.signal,
-    });
+      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: form,
+        signal: controller.signal,
+      });
 
-    if (!response.ok) {
-      const text = await response.text();
-      return { statusCode: response.status, headers: corsHeaders, body: text };
+      if (!response.ok) {
+        const text = await response.text();
+        return { statusCode: response.status, headers: corsHeaders, body: text };
+      }
+
+      const data = (await response.json()) as TranscriptionResponse;
+      transcript = data.text?.trim() || '';
     }
-
-    const data = (await response.json()) as TranscriptionResponse;
-    const transcript = data.text?.trim() || '';
     const blocked = transcript ? isBlockedHealthRequest(transcript) : false;
 
     if (blocked) {

@@ -7,3 +7,8 @@
   from = "/api/realtime/session"
   to = "/.netlify/functions/realtime-session"
   status = 200
+
+[[redirects]]
+  from = "/api/realtime/guard"
+  to = "/.netlify/functions/realtime-guard"
+  status = 200
