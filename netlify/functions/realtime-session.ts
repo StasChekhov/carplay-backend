@@ -1,4 +1,5 @@
 import type { Handler } from '@netlify/functions';
+import * as crypto from 'crypto';
 
 type OpenAIRealtimeSessionResponse = {
   client_secret?: { value?: string };
@@ -12,6 +13,7 @@ type SessionRequestBody = {
   prompt?: string;
   query?: string;
   transcript?: string;
+  guard_token?: string;
 };
 
 const controllerTimeoutMs = 15000;
@@ -82,6 +84,38 @@ function parseBody<T>(body?: string | null): T | undefined {
   return JSON.parse(body) as T;
 }
 
+function base64UrlDecode(input: string): string {
+  const padded = input.replace(/-/g, '+').replace(/_/g, '/');
+  const padLength = (4 - (padded.length % 4)) % 4;
+  const normalized = padded + '='.repeat(padLength);
+  return Buffer.from(normalized, 'base64').toString('utf8');
+}
+
+function isValidGuardToken(token: string, secret: string): boolean {
+  const parts = token.split('.');
+  if (parts.length !== 2) return false;
+  const [payloadB64, signatureB64] = parts;
+  const expectedSig = crypto
+    .createHmac('sha256', secret)
+    .update(payloadB64)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  if (signatureB64 !== expectedSig) return false;
+  try {
+    const payload = JSON.parse(base64UrlDecode(payloadB64)) as {
+      exp?: number;
+      allowed?: boolean;
+    };
+    if (!payload.allowed || !payload.exp) return false;
+    const now = Math.floor(Date.now() / 1000);
+    return payload.exp >= now;
+  } catch {
+    return false;
+  }
+}
+
 function isBlockedHealthRequest(text: string): boolean {
   const normalized = text.toLowerCase();
   return blockedHealthPatterns.some((pattern) => pattern.test(normalized));
@@ -111,12 +145,20 @@ export const handler: Handler = async (event) => {
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
+  const guardSecret = process.env.GUARD_TOKEN_SECRET;
   const envModel = process.env.REALTIME_MODEL;
   if (!apiKey) {
     return {
       statusCode: 500,
       headers: corsHeaders,
       body: JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
+    };
+  }
+  if (!guardSecret) {
+    return {
+      statusCode: 500,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: 'GUARD_TOKEN_SECRET is missing' }),
     };
   }
 
@@ -133,6 +175,17 @@ export const handler: Handler = async (event) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         error: 'Health-related requests are not supported.',
+        blocked: true,
+      }),
+    };
+  }
+
+  if (!payload.guard_token || !isValidGuardToken(payload.guard_token, guardSecret)) {
+    return {
+      statusCode: 403,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        error: 'Guard verification failed.',
         blocked: true,
       }),
     };

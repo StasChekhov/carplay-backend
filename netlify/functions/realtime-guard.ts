@@ -1,4 +1,5 @@
 import type { Handler } from '@netlify/functions';
+import * as crypto from 'crypto';
 
 type GuardRequestBody = {
   audio_base64?: string;
@@ -12,6 +13,7 @@ type TranscriptionResponse = {
 
 const controllerTimeoutMs = 15000;
 const transcriptionModel = 'whisper-1';
+const guardTokenTtlSeconds = 120;
 const blockedHealthPatterns: RegExp[] = [
   /\bdiet\b/,
   /\bcalories?\b/,
@@ -64,6 +66,25 @@ function isBlockedHealthRequest(text: string): boolean {
   return blockedHealthPatterns.some((pattern) => pattern.test(normalized));
 }
 
+function base64UrlEncode(input: string | Buffer): string {
+  const base64 = Buffer.from(input).toString('base64');
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function signGuardToken(secret: string, expiresAt: number): string {
+  const payload = JSON.stringify({ exp: expiresAt, allowed: true });
+  const payloadB64 = base64UrlEncode(payload);
+  const signature = crypto
+    .createHmac('sha256', secret)
+    .update(payloadB64)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  const signatureB64 = signature;
+  return `${payloadB64}.${signatureB64}`;
+}
+
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers: corsHeaders, body: '' };
@@ -82,11 +103,19 @@ export const handler: Handler = async (event) => {
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
+  const guardSecret = process.env.GUARD_TOKEN_SECRET;
   if (!apiKey) {
     return {
       statusCode: 500,
       headers: corsHeaders,
       body: JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
+    };
+  }
+  if (!guardSecret) {
+    return {
+      statusCode: 500,
+      headers: corsHeaders,
+      body: JSON.stringify({ error: 'GUARD_TOKEN_SECRET is missing' }),
     };
   }
 
@@ -155,10 +184,17 @@ export const handler: Handler = async (event) => {
       };
     }
 
+    const expiresAt = Math.floor(Date.now() / 1000) + guardTokenTtlSeconds;
+    const token = signGuardToken(guardSecret, expiresAt);
     return {
       statusCode: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ allowed: true, transcript }),
+      body: JSON.stringify({
+        allowed: true,
+        transcript,
+        guard_token: token,
+        expires_at: expiresAt,
+      }),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -1,3 +1,5 @@
+import * as crypto from 'crypto';
+
 type OpenAIRealtimeSessionResponse = {
   client_secret?: {
     value?: string;
@@ -12,6 +14,7 @@ type SessionRequestBody = {
   prompt?: string;
   query?: string;
   transcript?: string;
+  guard_token?: string;
 };
 
 const blockedHealthPatterns: RegExp[] = [
@@ -55,6 +58,38 @@ function isBlockedHealthRequest(text: string): boolean {
   return blockedHealthPatterns.some((pattern) => pattern.test(normalized));
 }
 
+function base64UrlDecode(input: string): string {
+  const padded = input.replace(/-/g, '+').replace(/_/g, '/');
+  const padLength = (4 - (padded.length % 4)) % 4;
+  const normalized = padded + '='.repeat(padLength);
+  return Buffer.from(normalized, 'base64').toString('utf8');
+}
+
+function isValidGuardToken(token: string, secret: string): boolean {
+  const parts = token.split('.');
+  if (parts.length !== 2) return false;
+  const [payloadB64, signatureB64] = parts;
+  const expectedSig = crypto
+    .createHmac('sha256', secret)
+    .update(payloadB64)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  if (signatureB64 !== expectedSig) return false;
+  try {
+    const payload = JSON.parse(base64UrlDecode(payloadB64)) as {
+      exp?: number;
+      allowed?: boolean;
+    };
+    if (!payload.allowed || !payload.exp) return false;
+    const now = Math.floor(Date.now() / 1000);
+    return payload.exp >= now;
+  } catch {
+    return false;
+  }
+}
+
 const safetySystemPrompt = [
   'You are SmartDrive Voice, an in-car voice assistant.',
   '',
@@ -84,6 +119,7 @@ const safetySystemPrompt = [
 
 export default async function handler(request?: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
+  const guardSecret = process.env.GUARD_TOKEN_SECRET;
   let payload: SessionRequestBody | undefined;
 
   if (request) {
@@ -114,6 +150,22 @@ export default async function handler(request?: Request) {
     return new Response(
       JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
       { status: 500 }
+    );
+  }
+  if (!guardSecret) {
+    return new Response(
+      JSON.stringify({ error: 'GUARD_TOKEN_SECRET is missing' }),
+      { status: 500 }
+    );
+  }
+
+  if (!payload?.guard_token || !isValidGuardToken(payload.guard_token, guardSecret)) {
+    return new Response(
+      JSON.stringify({
+        error: 'Guard verification failed.',
+        blocked: true,
+      }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } }
     );
   }
 

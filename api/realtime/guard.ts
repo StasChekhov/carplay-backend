@@ -1,3 +1,5 @@
+import * as crypto from 'crypto';
+
 type GuardRequestBody = {
   audio_base64?: string;
   mime_type?: string;
@@ -9,6 +11,7 @@ type TranscriptionResponse = {
 };
 
 const transcriptionModel = 'whisper-1';
+const guardTokenTtlSeconds = 120;
 const blockedHealthPatterns: RegExp[] = [
   /\bdiet\b/,
   /\bcalories?\b/,
@@ -50,11 +53,36 @@ function isBlockedHealthRequest(text: string): boolean {
   return blockedHealthPatterns.some((pattern) => pattern.test(normalized));
 }
 
+function base64UrlEncode(input: string | Buffer): string {
+  const base64 = Buffer.from(input).toString('base64');
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function signGuardToken(secret: string, expiresAt: number): string {
+  const payload = JSON.stringify({ exp: expiresAt, allowed: true });
+  const payloadB64 = base64UrlEncode(payload);
+  const signature = crypto
+    .createHmac('sha256', secret)
+    .update(payloadB64)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  return `${payloadB64}.${signature}`;
+}
+
 export default async function handler(request?: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
+  const guardSecret = process.env.GUARD_TOKEN_SECRET;
   if (!apiKey) {
     return new Response(
       JSON.stringify({ error: 'OPENAI_API_KEY is missing' }),
+      { status: 500 }
+    );
+  }
+  if (!guardSecret) {
+    return new Response(
+      JSON.stringify({ error: 'GUARD_TOKEN_SECRET is missing' }),
       { status: 500 }
     );
   }
@@ -112,8 +140,15 @@ export default async function handler(request?: Request) {
     );
   }
 
+  const expiresAt = Math.floor(Date.now() / 1000) + guardTokenTtlSeconds;
+  const token = signGuardToken(guardSecret, expiresAt);
   return new Response(
-    JSON.stringify({ allowed: true, transcript }),
+    JSON.stringify({
+      allowed: true,
+      transcript,
+      guard_token: token,
+      expires_at: expiresAt,
+    }),
     { status: 200, headers: { 'Content-Type': 'application/json' } }
   );
 }
