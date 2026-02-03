@@ -5,8 +5,110 @@ type OpenAIRealtimeSessionResponse = {
   expires_at?: string | number;
 };
 
-export default async function handler() {
+type SessionRequestBody = {
+  model?: string;
+  user_text?: string;
+  text?: string;
+  prompt?: string;
+  query?: string;
+  transcript?: string;
+};
+
+const blockedHealthPatterns: RegExp[] = [
+  /\bdiet\b/,
+  /\bcalories?\b/,
+  /\bcaloric\b/,
+  /\bmacro(s)?\b/,
+  /\bnutrition\b/,
+  /\bmeal plan\b/,
+  /\bprotein\b/,
+  /\bcarb(s)?\b/,
+  /\bfat\b/,
+  /\bweight loss\b/,
+  /\blose weight\b/,
+  /\bgain muscle\b/,
+  /\bbmi\b/,
+  /\bbody fat\b/,
+  /\bkcal\b/,
+  /\bsupplement(s)?\b/,
+  /\bvitamin(s)?\b/,
+  /диет/,
+  /калор/,
+  /макрос/,
+  /питан/,
+  /план питания/,
+  /белок/,
+  /углевод/,
+  /жир/,
+  /похуд/,
+  /сбросить вес/,
+  /набрать масс/,
+  /имт/,
+  /индекс массы тела/,
+  /ккал/,
+  /добавк/,
+  /витамин/,
+];
+
+function isBlockedHealthRequest(text: string): boolean {
+  const normalized = text.toLowerCase();
+  return blockedHealthPatterns.some((pattern) => pattern.test(normalized));
+}
+
+const safetySystemPrompt = [
+  'You are SmartDrive Voice, an in-car voice assistant.',
+  '',
+  'IMPORTANT SAFETY RULES:',
+  'You must NOT provide:',
+  '- medical advice',
+  '- health-related recommendations',
+  '- diagnosis or treatment suggestions',
+  '- interpretation of symptoms',
+  '- medication or dosage information',
+  '- diet recommendations or meal plans',
+  '- macro calculations, calorie targets, or nutrition prescriptions',
+  '',
+  'If the user asks any health, medical, or nutrition-related question:',
+  '- Politely refuse',
+  '- State that you cannot provide medical or nutrition advice',
+  '- Advise the user to consult a qualified healthcare professional',
+  '- Do NOT provide recommendations, calculations, or personalized guidance',
+  '',
+  'You may assist only with:',
+  '- general conversation',
+  '- driving-related assistance',
+  '- productivity',
+  '- navigation-style help',
+  '- non-medical informational requests',
+].join('\n');
+
+export default async function handler(request?: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
+  let payload: SessionRequestBody | undefined;
+
+  if (request) {
+    try {
+      payload = (await request.json()) as SessionRequestBody;
+    } catch {
+      payload = undefined;
+    }
+  }
+
+  const userText =
+    payload?.user_text ??
+    payload?.text ??
+    payload?.prompt ??
+    payload?.query ??
+    payload?.transcript;
+  if (userText && isBlockedHealthRequest(userText)) {
+    return new Response(
+      JSON.stringify({
+        error: 'Health-related requests are not supported.',
+        blocked: true,
+      }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
 
   if (!apiKey) {
     return new Response(
@@ -22,9 +124,10 @@ export default async function handler() {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-4o-realtime-preview',
+      model: payload?.model || 'gpt-4o-realtime-preview',
       voice: 'alloy',
       modalities: ['audio'],
+      instructions: safetySystemPrompt,
     }),
   });
 

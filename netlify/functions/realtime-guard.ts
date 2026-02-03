@@ -1,20 +1,17 @@
 import type { Handler } from '@netlify/functions';
 
-type OpenAIRealtimeSessionResponse = {
-  client_secret?: { value?: string };
-  expires_at?: string | number;
+type GuardRequestBody = {
+  audio_base64?: string;
+  mime_type?: string;
+  model?: string;
 };
 
-type SessionRequestBody = {
-  model?: string;
-  user_text?: string;
+type TranscriptionResponse = {
   text?: string;
-  prompt?: string;
-  query?: string;
-  transcript?: string;
 };
 
 const controllerTimeoutMs = 15000;
+const transcriptionModel = 'whisper-1';
 const blockedHealthPatterns: RegExp[] = [
   /\bdiet\b/,
   /\bcalories?\b/,
@@ -50,32 +47,12 @@ const blockedHealthPatterns: RegExp[] = [
   /добавк/,
   /витамин/,
 ];
-const safetySystemPrompt = [
-  'You are SmartDrive Voice, an in-car voice assistant.',
-  '',
-  'IMPORTANT SAFETY RULES:',
-  'You must NOT provide:',
-  '- medical advice',
-  '- health-related recommendations',
-  '- diagnosis or treatment suggestions',
-  '- interpretation of symptoms',
-  '- medication or dosage information',
-  '- diet recommendations or meal plans',
-  '- macro calculations, calorie targets, or nutrition prescriptions',
-  '',
-  'If the user asks any health, medical, or nutrition-related question:',
-  '- Politely refuse',
-  '- State that you cannot provide medical or nutrition advice',
-  '- Advise the user to consult a qualified healthcare professional',
-  '- Do NOT provide recommendations, calculations, or personalized guidance',
-  '',
-  'You may assist only with:',
-  '- general conversation',
-  '- driving-related assistance',
-  '- productivity',
-  '- navigation-style help',
-  '- non-medical informational requests',
-].join('\n');
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
 
 function parseBody<T>(body?: string | null): T | undefined {
   if (!body) return undefined;
@@ -86,12 +63,6 @@ function isBlockedHealthRequest(text: string): boolean {
   const normalized = text.toLowerCase();
   return blockedHealthPatterns.some((pattern) => pattern.test(normalized));
 }
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
@@ -111,7 +82,6 @@ export const handler: Handler = async (event) => {
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
-  const envModel = process.env.REALTIME_MODEL;
   if (!apiKey) {
     return {
       statusCode: 500,
@@ -120,64 +90,75 @@ export const handler: Handler = async (event) => {
     };
   }
 
-  const payload = parseBody<SessionRequestBody>(event.body) || {};
-  const userText =
-    payload.user_text ??
-    payload.text ??
-    payload.prompt ??
-    payload.query ??
-    payload.transcript;
-  if (userText && isBlockedHealthRequest(userText)) {
+  let payload: GuardRequestBody;
+  try {
+    payload = parseBody<GuardRequestBody>(event.body) || {};
+  } catch (error) {
     return {
-      statusCode: 403,
+      statusCode: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        error: 'Health-related requests are not supported.',
-        blocked: true,
+        error: 'Invalid JSON body',
+        details: error instanceof Error ? error.message : String(error),
       }),
     };
   }
 
-  const model = payload.model || envModel || 'gpt-4o-realtime-preview';
+  if (!payload.audio_base64) {
+    return {
+      statusCode: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'audio_base64 is required' }),
+    };
+  }
+
+  const mimeType = payload.mime_type || 'audio/wav';
+  const model = payload.model || transcriptionModel;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), controllerTimeoutMs);
 
   try {
-    const response = await fetch(
-      'https://api.openai.com/v1/realtime/sessions',
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          voice: 'verse',
-          modalities: ['audio', 'text'],
-          input_audio_format: 'pcm16',
-          output_audio_format: 'pcm16',
-          instructions: safetySystemPrompt,
-        }),
-        signal: controller.signal,
-      }
-    );
+    const audioBuffer = Buffer.from(payload.audio_base64, 'base64');
+    const form = new FormData();
+    const file = new Blob([audioBuffer], { type: mimeType });
+    form.append('file', file, 'audio');
+    form.append('model', model);
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: form,
+      signal: controller.signal,
+    });
 
     if (!response.ok) {
       const text = await response.text();
       return { statusCode: response.status, headers: corsHeaders, body: text };
     }
 
-    const data = (await response.json()) as OpenAIRealtimeSessionResponse;
+    const data = (await response.json()) as TranscriptionResponse;
+    const transcript = data.text?.trim() || '';
+    const blocked = transcript ? isBlockedHealthRequest(transcript) : false;
+
+    if (blocked) {
+      return {
+        statusCode: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          error: 'Health-related requests are not supported.',
+          blocked: true,
+          transcript,
+        }),
+      };
+    }
 
     return {
       statusCode: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        client_secret: data.client_secret?.value,
-        expires_at: data.expires_at,
-      }),
+      body: JSON.stringify({ allowed: true, transcript }),
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
