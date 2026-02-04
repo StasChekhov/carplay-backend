@@ -305,6 +305,7 @@ export const handler: Handler = async (event) => {
           modalities: ['audio', 'text'],
           input_audio_format: 'pcm16',
           output_audio_format: 'pcm16',
+          input_audio_transcription: { model: 'whisper-1' },
           instructions: safetySystemPrompt,
         }),
         signal: controller.signal,

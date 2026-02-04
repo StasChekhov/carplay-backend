@@ -273,6 +273,7 @@ export default async function handler(request?: Request) {
       model: payload?.model || 'gpt-4o-realtime-preview',
       voice: 'alloy',
       modalities: ['audio'],
+      input_audio_transcription: { model: 'whisper-1' },
       instructions: safetySystemPrompt,
     }),
   });
