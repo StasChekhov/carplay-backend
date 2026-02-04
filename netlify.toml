@@ -12,3 +12,8 @@
   from = "/api/realtime/guard"
   to = "/.netlify/functions/realtime-guard"
   status = 200
+
+[[redirects]]
+  from = "/api/voice/chat"
+  to = "/.netlify/functions/voice-chat"
+  status = 200
