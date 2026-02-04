@@ -36,8 +36,13 @@ const blockedHealthPatterns: RegExp[] = [
   /\ballergy|allergic\b/,
   /\binfection(s)?\b/,
   /\bfever\b/,
+  /\bdizziness\b/,
+  /\bnausea\b/,
+  /\bfatigue\b/,
+  /\bstress\b/,
   /\bheadache\b/,
   /\bpain\b/,
+  /\bback pain\b/,
   /\bchest pain\b/,
   /\bblood pressure\b/,
   /\bhypertension\b/,
@@ -132,8 +137,13 @@ const blockedHealthPatterns: RegExp[] = [
   /противопоказ/,
   /давление/,
   /температур/,
+  /головокруж/,
+  /тошнот/,
+  /усталост/,
+  /стресс/,
   /жар/,
   /боль/,
+  /спин/,
   /грудн/,
   /сердц/,
   /пульс/,
@@ -172,6 +182,18 @@ const safetySystemPrompt = [
   '- navigation-style help',
   '- non-medical informational requests',
 ].join('\n');
+
+const refusalText =
+  "I can't help with that. Please consult a qualified healthcare professional.";
+
+const buildRefusalResponse = () => ({
+  statusCode: 200,
+  headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    response: refusalText,
+    blocked: true,
+  }),
+});
 
 function parseBody<T>(body?: string | null): T | undefined {
   if (!body) return undefined;
@@ -264,14 +286,7 @@ export const handler: Handler = async (event) => {
     payload.query ??
     payload.transcript;
   if (userText && isBlockedHealthRequest(userText)) {
-    return {
-      statusCode: 403,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        error: 'Health-related requests are not supported.',
-        blocked: true,
-      }),
-    };
+    return buildRefusalResponse();
   }
 
   if (!payload.guard_token || !isValidGuardToken(payload.guard_token, guardSecret)) {
